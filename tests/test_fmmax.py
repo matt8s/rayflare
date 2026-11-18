@@ -763,7 +763,7 @@ def test_higher_diffraction_orders_land_in_grating_equation_bins(side):
     orders, (reflection, transmission, absorption, matrix, _), bins = (
         _diffracting_result(side)
     )
-    edges, phi_edges, angles = bins
+    angles = bins[2]
     theta, phi = np.deg2rad([12, 37])
     column = _analytic_bin(theta if side == 1 else np.pi - theta, phi, *bins)
     if side == -1:

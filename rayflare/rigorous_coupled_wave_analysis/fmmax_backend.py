@@ -3,7 +3,8 @@
 # This file is part of RayFlare and is released under the GNU Lesser General
 # Public License (LGPL), version 3. Please see LICENSE.txt.
 
-"""Optional FMMAX implementation for RayFlare's RCWA interface.
+"""
+Optional FMMAX implementation for RayFlare's RCWA interface.
 
 RayFlare describes RCWA structures in nanometres and uses refractive indices
 ``n + 1j * k``. FMMAX is run in the same length unit, with permittivity
@@ -153,7 +154,8 @@ def _eigensolve_options(fmm, backend_options):
 
 
 def _physical_incident_flux(incident_amplitude, solve_result, fields, jnp):
-    """Normalize field-loss profiles by physical flux, not a release prefactor.
+    """
+    Normalize field-loss profiles by physical flux, not a release prefactor.
 
     FMMAX variants use different overall factors in amplitude_poynting_flux.
     Ratios of modal powers are unaffected, but a physical |E|^2 loss density
@@ -376,7 +378,8 @@ def solve(
     user_options=None,
     profile_depths=None,
 ):
-    """Solve one RayFlare RCWA wavelength with FMMAX.
+    """
+    Solve one RayFlare RCWA wavelength with FMMAX.
 
     Length quantities are in nm, and ``theta`` and ``phi`` are in degrees.
     The returned absorption profile is unit-cell averaged and has units nm-1.

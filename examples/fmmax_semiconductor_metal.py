@@ -1,4 +1,5 @@
-"""FMMAX example: patterned GaAs above a finite silver layer.
+"""
+FMMAX example: patterned GaAs above a finite silver layer.
 
 Install the optional backend first with ``pip install "rayflare[fmmax]"``.
 """

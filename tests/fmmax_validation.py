@@ -1,4 +1,5 @@
-"""Separate-process CPU/GPU snapshots of the regression fixtures.
+"""
+Separate-process CPU/GPU snapshots of the regression fixtures.
 
 Run from the checkout, in each source's environment::
 
@@ -64,16 +65,69 @@ def _power_tolerance(record, key):
     return max(2e-6, n * eps / (1 - n * eps))
 
 
-def snapshot(path, backend, eig_backend):
-    import jax
-    from fmmax import fields, fmm, scattering
-    from rayflare.rigorous_coupled_wave_analysis import fmmax_backend as adapter
+def _collect_fixture_data(eig_backend):
     from test_fmmax import (
         _diffracting_result,
         _lossy_pattern_result,
         _planar_result,
         _patterned_result,
     )
+
+    data = {}
+    results = {
+        "planar": _planar_result("p", profile_depths=np.arange(0.5, 240, 1)),
+        "patterned": _patterned_result("p", orders=49, grid_spacing=2),
+        "pattern": _lossy_pattern_result(49, 2, 1, eig_backend),
+    }
+    for side in (1, -1):
+        order, matrix, _ = _diffracting_result(side, eig_backend)
+        results[f"diffraction_{side}"] = order
+        data[f"matrix_{side}"] = matrix[3].todense()
+    for name, result in results.items():
+        for key in (
+            "R",
+            "T",
+            "A_per_layer",
+            "R_per_order",
+            "T_per_order",
+            "profile",
+        ):
+            if key in result:
+                value = np.asarray(result[key])
+                assert np.isfinite(value).all(), (name, key)
+                data[f"{name}_{key}"] = value
+        assert (
+            abs(result["R"] + result["T"] + sum(result["A_per_layer"]) - 1) < 2e-6
+        )
+    return results, data
+
+
+def _assert_snapshot_witnesses(
+    witnesses, counts, lowering, selected, backend, eig_backend
+):
+    assert all(
+        name in witnesses
+        for name in (
+            "eigensolve_isotropic_media",
+            "stack_s_matrices_interior",
+            "fields_on_grid",
+        )
+    )
+    assert counts.get(selected, 0) > 0, (
+        "No selected eigensolver witness; check optional jeig",
+        selected,
+    )
+    if eig_backend == "cusolver":
+        assert counts.get("_eig_cusolver", 0) > 0
+        assert "cusolver_geev_ffi" in lowering["_eig_cusolver"]
+    elif backend == "gpu" and selected == "_eig_callback":
+        assert counts.get("host_eigensolve", 0) > 0
+
+
+def snapshot(path, backend, eig_backend):
+    import jax
+    from fmmax import fields, fmm, scattering
+    from rayflare.rigorous_coupled_wave_analysis import fmmax_backend as adapter
 
     assert jax.default_backend() == backend, (jax.default_backend(), backend)
     devices = jax.devices()
@@ -152,7 +206,6 @@ def snapshot(path, backend, eig_backend):
         )
         return original_solve(*args, **kwargs)
 
-    data = {}
     with ExitStack() as stack:
         stack.enter_context(patch.object(adapter, "solve", solve))
         stack.enter_context(
@@ -178,73 +231,22 @@ def snapshot(path, backend, eig_backend):
                 if eig_backend == "cusolver"
                 else ("_eig_callback" if backend == "gpu" else "_eig_jax")
             )
-        if selected != "_eig_callback":
-            stack.enter_context(
-                patch.object(
-                    eig_module,
-                    selected,
-                    eig_witness(selected, getattr(eig_module, selected)),
-                )
+        stack.enter_context(
+            patch.object(
+                eig_module, selected, eig_witness(selected, getattr(eig_module, selected))
             )
-        else:
+        )
+        if selected == "_eig_callback" and backend == "gpu":
             # The maintained default explicitly transfers its matrix to a host callback.
             stack.enter_context(
                 patch.object(
                     eig_module,
-                    selected,
-                    eig_witness(selected, getattr(eig_module, selected)),
+                    "_eig_jax_cpu",
+                    witness("host_eigensolve", eig_module._eig_jax_cpu, "cpu"),
                 )
             )
-            if backend == "gpu":
-                stack.enter_context(
-                    patch.object(
-                        eig_module,
-                        "_eig_jax_cpu",
-                        witness("host_eigensolve", eig_module._eig_jax_cpu, "cpu"),
-                    )
-                )
-        results = {
-            "planar": _planar_result("p", profile_depths=np.arange(0.5, 240, 1)),
-            "patterned": _patterned_result("p", orders=49, grid_spacing=2),
-            "pattern": _lossy_pattern_result(49, 2, 1, eig_backend),
-        }
-        for side in (1, -1):
-            order, matrix, _ = _diffracting_result(side, eig_backend)
-            results[f"diffraction_{side}"] = order
-            data[f"matrix_{side}"] = matrix[3].todense()
-        for name, result in results.items():
-            for key in (
-                "R",
-                "T",
-                "A_per_layer",
-                "R_per_order",
-                "T_per_order",
-                "profile",
-            ):
-                if key in result:
-                    value = np.asarray(result[key])
-                    assert np.isfinite(value).all(), (name, key)
-                    data[f"{name}_{key}"] = value
-            assert (
-                abs(result["R"] + result["T"] + sum(result["A_per_layer"]) - 1) < 2e-6
-            )
-        assert all(
-            name in witnesses
-            for name in (
-                "eigensolve_isotropic_media",
-                "stack_s_matrices_interior",
-                "fields_on_grid",
-            )
-        )
-        assert counts.get(selected, 0) > 0, (
-            "No selected eigensolver witness; check optional jeig",
-            selected,
-        )
-        if eig_backend == "cusolver":
-            assert counts.get("_eig_cusolver", 0) > 0
-            assert "cusolver_geev_ffi" in lowering["_eig_cusolver"]
-        elif backend == "gpu" and selected == "_eig_callback":
-            assert counts.get("host_eigensolve", 0) > 0
+        results, data = _collect_fixture_data(eig_backend)
+        _assert_snapshot_witnesses(witnesses, counts, lowering, selected, backend, eig_backend)
 
     _physical_bounds(data)
 
